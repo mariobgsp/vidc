@@ -10,8 +10,11 @@ VMAF_VERSION=v3.2.0
 PREFIX="$(pwd)/dist-ffmpeg"
 
 # --- x264 (static; H.264 encoder) ---
-git clone --depth 1 --branch "$X264_VERSION" https://code.videolan.org/videolan/x264.git
+# NOTE: `git clone --branch <sha>` does not work (a raw SHA is not a branch);
+# clone then check out the pinned revision instead. The pin is unchanged.
+git clone https://code.videolan.org/videolan/x264.git
 cd x264
+git checkout "$X264_VERSION"
 ./configure --prefix="$PREFIX" --enable-static --disable-cli --disable-opencl --disable-lavf
 make -j"$(getconf _NPROCESSORS_ONLN)"
 make install
