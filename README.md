@@ -326,4 +326,5 @@ A source build requires Go 1.27+; the version floor comes from the GUI dependenc
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Third-party components (including the bundled
+ffmpeg build) are listed in [THIRDPARTY.md](THIRDPARTY.md).

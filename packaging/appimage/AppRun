@@ -1,0 +1,6 @@
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+# Double-clicking an AppImage gives stdin that is not a terminal, so the window must be
+# requested explicitly; passing arguments through keeps `./vidc.AppImage file.mp4` CLI.
+if [ "$#" -eq 0 ]; then exec "$HERE/usr/bin/vidc" --gui; fi
+exec "$HERE/usr/bin/vidc" "$@"
