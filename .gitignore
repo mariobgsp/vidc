@@ -1,0 +1,5 @@
+dist/
+*.min.mp4
+*.min-*.mp4
+/vidc
+/vidc.exe
