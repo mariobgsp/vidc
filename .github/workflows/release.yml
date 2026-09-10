@@ -78,6 +78,7 @@ jobs:
             meson
             ninja
             mingw-w64-x86_64-pkg-config
+            mingw-w64-x86_64-python
             mingw-w64-x86_64-ffmpeg
             procps-ng
             git
@@ -97,6 +98,12 @@ jobs:
           mkdir -p .ffbuild && cd .ffbuild
           export LDFLAGS="-static"
           bash ../build/ffmpeg-build.sh
+
+      - name: Dump configure log on failure (posix)
+        if: failure()
+        run: |
+          LOG=$(ls -d .ffbuild/ffmpeg-*/ffbuild/config.log 2>/dev/null | head -1)
+          if [ -n "$LOG" ]; then grep -B3 -A18 "ERROR:" "$LOG" | head -60; fi
 
       # --- 3. the A2 usability assertions: the artifact must actually work ---
       - name: Assert ffmpeg features (posix)

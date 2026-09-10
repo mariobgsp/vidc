@@ -23,7 +23,10 @@ cd ..
 # --- libvmaf (static; quality metric) ---
 git clone --depth 1 --branch "$VMAF_VERSION" https://github.com/Netflix/vmaf.git
 cd vmaf/libvmaf
-meson setup build --prefix="$PREFIX" --buildtype release -Ddefault_library=static
+# NOTE: -Dlibdir=lib keeps libvmaf.pc under $PREFIX/lib/pkgconfig on every
+# platform (meson defaults to lib/<triplet> on Debian/Ubuntu, which ffmpeg's
+# PKG_CONFIG_PATH below would miss -> "libvmaf not found").
+meson setup build --prefix="$PREFIX" -Dlibdir=lib --buildtype release -Ddefault_library=static
 ninja -C build
 ninja -C build install
 cd ../..
