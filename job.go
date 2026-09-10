@@ -68,7 +68,7 @@ func runJobInner(ctx context.Context, pl plan, onProgress func(Progress)) error 
 // Done callback on progress=end. stderr is captured and embedded in the returned
 // error only — never written anywhere else.
 func runFFmpeg(ctx context.Context, argv []string, total time.Duration, label, failPrefix string, onProgress func(Progress)) error {
-	c := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	c := exec.CommandContext(ctx, toolPath(argv[0]), argv[1:]...)
 	stdout, err := c.StdoutPipe()
 	if err != nil {
 		return err

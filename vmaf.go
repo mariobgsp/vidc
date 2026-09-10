@@ -17,7 +17,7 @@ var (
 
 func vmafAvailable() bool {
 	vmafOnce.Do(func() {
-		out, err := exec.Command("ffmpeg", "-hide_banner", "-filters").CombinedOutput()
+		out, err := exec.Command(toolPath("ffmpeg"), "-hide_banner", "-filters").CombinedOutput()
 		if err != nil {
 			vmafCachedVal = false
 			return
@@ -47,7 +47,7 @@ func vmafArgs(orig, enc string, d time.Duration) (args []string, start time.Dura
 		"-ss", ss, "-t", tt, "-i", enc,
 		"-ss", ss, "-t", tt, "-i", orig,
 		"-lavfi", "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf",
-		"-f", "null", "-"}
+		"-an", "-f", "null", "-"}
 	return args, start
 }
 
@@ -56,7 +56,7 @@ func measureVMAF(ctx context.Context, orig, enc string, d time.Duration) (float6
 		return 0, 0, false
 	}
 	args, start := vmafArgs(orig, enc, d)
-	out, err := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, toolPath("ffmpeg"), args...).CombinedOutput()
 	if err != nil {
 		return 0, 0, false
 	}

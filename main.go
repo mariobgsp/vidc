@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -281,7 +280,7 @@ func lookupPreset(name string) (preset, bool) {
 func preflight() {
 	missing := ""
 	for _, b := range []string{"ffmpeg", "ffprobe"} {
-		if _, err := exec.LookPath(b); err != nil {
+		if toolPath(b) == b {
 			missing = b
 			break
 		}

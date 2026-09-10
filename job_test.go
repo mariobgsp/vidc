@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,55 @@ import (
 
 	"github.com/crgimenes/glaze"
 )
+
+func TestToolPath(t *testing.T) {
+	dir := t.TempDir()
+	bin := "ffmpeg"
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
+	// empty dir: miss
+	if p, ok := toolPathIn(dir, "ffmpeg"); ok || p != "" {
+		t.Fatalf("empty dir: got %q,%v want miss", p, ok)
+	}
+	// directory, not file: miss
+	if err := os.Mkdir(filepath.Join(dir, bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := toolPathIn(dir, "ffmpeg"); ok {
+		t.Fatal("directory must miss")
+	}
+	if err := os.Remove(filepath.Join(dir, bin)); err != nil {
+		t.Fatal(err)
+	}
+	// non-executable file: miss outside Windows (no exec bit there)
+	if err := os.WriteFile(filepath.Join(dir, bin), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" {
+		if _, ok := toolPathIn(dir, "ffmpeg"); ok {
+			t.Fatal("non-executable file must miss")
+		}
+	}
+	// executable file: hit with the exact sibling path
+	if err := os.Chmod(filepath.Join(dir, bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := toolPathIn(dir, "ffmpeg")
+	if !ok || p != filepath.Join(dir, bin) {
+		t.Fatalf("executable: got %q,%v", p, ok)
+	}
+	// unknown tool: bare name so the not-found path fires
+	if got := toolPath("definitely-not-a-vidc-tool"); got != "definitely-not-a-vidc-tool" {
+		t.Fatalf("unknown tool: got %q", got)
+	}
+	// real PATH binary resolves past the bare name
+	if _, err := exec.LookPath("ffmpeg"); err == nil {
+		if got := toolPath("ffmpeg"); got == "ffmpeg" {
+			t.Fatal("PATH ffmpeg should resolve")
+		}
+	}
+}
 
 func TestWantsGUI(t *testing.T) {
 	cases := []struct {
