@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -26,11 +27,11 @@ func vmafAvailable() bool {
 	return vmafCachedVal
 }
 
-func measureVMAF(orig, enc string, d time.Duration) (float64, time.Duration, bool) {
-	if !vmafAvailable() {
-		return 0, 0, false
-	}
-	var start, length time.Duration
+// vmafArgs builds the sample-trimmed libvmaf invocation: the encoded file is
+// input 0 (distorted) and the original is input 1 (reference). Single-sourced
+// so the order cannot drift between callers.
+func vmafArgs(orig, enc string, d time.Duration) (args []string, start time.Duration) {
+	var length time.Duration
 	if d < 35*time.Second {
 		start, length = 0, d
 	} else {
@@ -42,12 +43,20 @@ func measureVMAF(orig, enc string, d time.Duration) (float64, time.Duration, boo
 	}
 	ss := fmt.Sprintf("%.3f", start.Seconds())
 	tt := fmt.Sprintf("%.3f", length.Seconds())
-	args := []string{"-hide_banner",
+	args = []string{"-hide_banner",
 		"-ss", ss, "-t", tt, "-i", enc,
 		"-ss", ss, "-t", tt, "-i", orig,
 		"-lavfi", "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf",
 		"-f", "null", "-"}
-	out, err := exec.Command("ffmpeg", args...).CombinedOutput()
+	return args, start
+}
+
+func measureVMAF(ctx context.Context, orig, enc string, d time.Duration) (float64, time.Duration, bool) {
+	if !vmafAvailable() {
+		return 0, 0, false
+	}
+	args, start := vmafArgs(orig, enc, d)
+	out, err := exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput()
 	if err != nil {
 		return 0, 0, false
 	}

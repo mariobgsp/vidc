@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var version = "dev"
@@ -41,6 +44,8 @@ func run(args []string) int {
 	noVerify := fs.Bool("no-verify", false, "skip VMAF")
 	assumeYes := fs.Bool("y", false, "assume yes / skip wizard")
 	showVer := fs.Bool("version", false, "print version")
+	forceGUI := fs.Bool("gui", false, "open the GUI window")
+	forceCLI := fs.Bool("cli", false, "force CLI mode")
 	if err := fs.Parse(splitArgs(args)); err != nil {
 		return 2
 	}
@@ -50,6 +55,16 @@ func run(args []string) int {
 	}
 	files := fs.Args()
 	preflight()
+	// Auto-GUI needs an interactive session, not just a display: with stdin
+	// redirected (cron, scripts, </dev/null) there is nobody to click anything,
+	// so fall through to the CLI, which exits promptly via usage/EOF handling.
+	// An explicit -gui still opens the window regardless of stdin.
+	if wantsGUI(*forceGUI, *forceCLI, sawCLIArgs(fs, files), hasDisplay() && isStdinTTY()) {
+		if code := runGUI(files); code == 0 || *forceGUI {
+			return code
+		}
+		// Auto-chosen GUI failed (no WebView runtime): fall back to the CLI below.
+	}
 	if *q == "" && *size == "" && !*assumeYes && isStdinTTY() {
 		wq, wsize, wfiles, ok := wizard(files)
 		if !ok {
@@ -209,7 +224,7 @@ func processOne(f string, p preset, target int64, outDir string, verify bool) (*
 	var offset time.Duration
 	var ok bool
 	if verify {
-		score, offset, ok = measureVMAF(f, out, info.Duration)
+		score, offset, ok = measureVMAF(context.Background(), f, out, info.Duration)
 		if ok {
 			vmafStr = fmt.Sprintf("%.2f @ %s", score, formatOffset(offset))
 		}
@@ -288,12 +303,54 @@ func preflight() {
 	os.Exit(1)
 }
 
-func isStdinTTY() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
+func isStdinTTY() bool { return isTerminal(os.Stdin) }
+
+// isTerminal reports whether f is an interactive terminal.
+// os.ModeCharDevice is NOT sufficient: /dev/null and /dev/zero are character
+// devices, so that test wrongly reports them as terminals (which made
+// `vidc </dev/null` run the wizard and spin on EOF).
+func isTerminal(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
+}
+
+// wantsGUI reports whether the GUI should be used for this invocation.
+func wantsGUI(forceGUI, forceCLI bool, sawArgs bool, display bool) bool {
+	if forceCLI {
 		return false
 	}
-	return fi.Mode()&os.ModeCharDevice != 0
+	if forceGUI {
+		return true
+	}
+	if sawArgs {
+		return false
+	}
+	return display
+}
+
+// sawCLIArgs reports whether the user passed file operands or any CLI-mode flag.
+func sawCLIArgs(fs *flag.FlagSet, files []string) bool {
+	if len(files) > 0 {
+		return true
+	}
+	saw := false
+	fs.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "gui", "cli", "version":
+		default:
+			saw = true
+		}
+	})
+	return saw
+}
+
+// hasDisplay reports whether a graphical display is present.
+func hasDisplay() bool {
+	switch runtime.GOOS {
+	case "windows", "darwin":
+		return true
+	default:
+		return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
+	}
 }
 
 // splitArgs reorders args so flags (and their values) precede file operands.
@@ -337,7 +394,11 @@ func wizard(files []string) (q, size string, out []string, ok bool) {
 	out = files
 	for len(out) == 0 {
 		emit(os.Stdout, "video path: ")
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			// EOF or read error with nothing buffered: nobody is there to answer.
+			return "", "", nil, false
+		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -396,7 +457,12 @@ func wizard(files []string) (q, size string, out []string, ok bool) {
 	emit(os.Stdout, "\n  or type a target size (e.g. 8M):\n")
 	for {
 		emit(os.Stdout, "> ")
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			// EOF with nothing buffered: stop rather than silently
+			// encoding with a default for a user who is not there.
+			return "", "", nil, false
+		}
 		line = strings.TrimSpace(strings.ToLower(line))
 		if line == "" {
 			return "good", "", out, true

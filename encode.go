@@ -1,12 +1,10 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -132,140 +130,66 @@ func reserveName(dir, stem, in string) (string, error) {
 }
 
 func runEncode(pl plan, logw io.Writer) error {
-	if pl.Target > 0 {
-		tmp, err := os.MkdirTemp("", "vidc-pass")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tmp)
-		passlog := filepath.Join(tmp, "pass")
-		p1 := buildArgs(pl, 1, passlog)
-		var b1 bytes.Buffer
-		c1 := exec.Command(p1[0], p1[1:]...)
-		c1.Stderr = &b1
-		if err := c1.Run(); err != nil {
-			return fmt.Errorf("pass 1 failed: %w\n%s", err, b1.String())
-		}
-		p2 := buildArgs(pl, 2, passlog)
-		return runWithProgress(p2, pl.Info.Duration, logw, filepath.Base(pl.In))
+	if logw == nil {
+		logw = os.Stdout
 	}
-	return runWithProgress(buildArgs(pl, 0, ""), pl.Info.Duration, logw, filepath.Base(pl.In))
+	return runJob(context.Background(), pl, cliProgress(logw, pl.Info.Duration, filepath.Base(pl.In)))
 }
 
 func runWithProgress(argv []string, total time.Duration, logw io.Writer, label string) error {
 	if logw == nil {
 		logw = os.Stdout
 	}
-	c := exec.Command(argv[0], argv[1:]...)
-	stdout, err := c.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	var errout bytes.Buffer
-	c.Stderr = &errout
-	if err := c.Start(); err != nil {
-		return err
-	}
-	tty := isTTY()
-	var outUs int64
-	var speed float64
-	lastPrint := time.Now().Add(-10 * time.Second)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 64*1024), 64*1024)
-		for sc.Scan() {
-			line := sc.Text()
-			k, v, ok := strings.Cut(line, "=")
-			if !ok {
-				continue
-			}
-			k = strings.TrimSpace(k)
-			v = strings.TrimSpace(v)
-			changed := false
-			switch k {
-			case "out_time_us":
-				if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-					outUs = n
-					changed = true
-				}
-			// ponytail: ffmpeg's out_time_ms is actually microseconds (verified on 9.0.1);
-			// out_time_us is authoritative, so ignore out_time_ms entirely.
-			case "out_time":
-				if us, ok := parseOutTime(v); ok {
-					outUs = us
-					changed = true
-				}
-			case "speed":
-				if s, ok := parseSpeed(v); ok {
-					speed = s
-					changed = true
-				}
-			case "progress":
-				if v == "end" {
-					renderProgress(logw, tty, total, int64(total/time.Microsecond), speed, true, label)
-					return
-				}
-			}
-			if !changed {
-				continue
-			}
-			now := time.Now()
-			if tty {
-				renderProgress(logw, true, total, outUs, speed, false, label)
-			} else if now.Sub(lastPrint) >= 5*time.Second {
-				lastPrint = now
-				renderProgress(logw, false, total, outUs, speed, false, label)
-			}
-		}
-	}()
-	err = c.Wait()
-	<-done
-	if err != nil {
-		return fmt.Errorf("ffmpeg failed: %w\n%s", err, errout.String())
-	}
-	if tty {
-		outMu.Lock()
-		fmt.Fprintln(logw)
-		outMu.Unlock()
-	}
-	return nil
+	return runFFmpeg(context.Background(), argv, total, label, "ffmpeg failed", cliProgress(logw, total, label))
 }
 
-func renderProgress(w io.Writer, tty bool, total time.Duration, outUs int64, speed float64, final bool, label string) {
-	if total <= 0 {
-		return
-	}
-	pct := float64(outUs) / float64(total/time.Microsecond) * 100
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 100 || final {
-		pct = 100
-	}
-	if tty {
-		eta := "—"
-		if speed > 0 && !final {
-			rem := (float64(total/time.Microsecond) - float64(outUs)) / 1e6 / speed
-			if rem < 0 {
-				rem = 0
+// cliProgress renders Progress callbacks with exactly the historical CLI output:
+// a live single line on a TTY, throttled plain lines otherwise, and a final
+// newline on a TTY when done.
+func cliProgress(logw io.Writer, total time.Duration, label string) func(Progress) {
+	tty := isTTY()
+	lastPrint := time.Now().Add(-10 * time.Second)
+	return func(pr Progress) {
+		if total <= 0 {
+			if pr.Done && tty {
+				outMu.Lock()
+				fmt.Fprintln(logw)
+				outMu.Unlock()
 			}
-			eta = (time.Duration(rem) * time.Second).Round(time.Second).String()
+			return
 		}
-		outMu.Lock()
-		defer outMu.Unlock()
-		fmt.Fprintf(w, "\r[%s] %.1f%%  %0.2fx  ETA %s\033[K", label, pct, speed, eta)
-	} else {
-		eta := "—"
-		if speed > 0 && !final {
-			rem := (float64(total/time.Microsecond) - float64(outUs)) / 1e6 / speed
-			if rem < 0 {
-				rem = 0
+		pct := pr.Percent
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 || pr.Done {
+			pct = 100
+		}
+		if tty {
+			eta := "—"
+			if pr.Speed > 0 && !pr.Done {
+				eta = pr.ETA.Round(time.Second).String()
 			}
-			eta = (time.Duration(rem) * time.Second).Round(time.Second).String()
+			outMu.Lock()
+			fmt.Fprintf(logw, "\r[%s] %.1f%%  %0.2fx  ETA %s\033[K", label, pct, pr.Speed, eta)
+			outMu.Unlock()
+			if pr.Done {
+				outMu.Lock()
+				fmt.Fprintln(logw)
+				outMu.Unlock()
+			}
+			return
 		}
-		fmt.Fprintf(w, "[%s] progress: %.1f%% speed=%.2fx eta=%s\n", label, pct, speed, eta)
+		now := time.Now()
+		if !pr.Done && now.Sub(lastPrint) < 5*time.Second {
+			return
+		}
+		lastPrint = now
+		eta := "—"
+		if pr.Speed > 0 && !pr.Done {
+			eta = pr.ETA.Round(time.Second).String()
+		}
+		fmt.Fprintf(logw, "[%s] progress: %.1f%% speed=%.2fx eta=%s\n", label, pct, pr.Speed, eta)
 	}
 }
 
@@ -295,13 +219,7 @@ func parseSpeed(s string) (float64, bool) {
 	return f, true
 }
 
-func isTTY() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
+func isTTY() bool { return isTerminal(os.Stdout) }
 
 func parseSize(s string) (int64, error) {
 	t := strings.TrimSpace(strings.ToLower(s))
