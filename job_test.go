@@ -344,6 +344,9 @@ func TestRunJobCancel(t *testing.T) {
 func buildTestBinary(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "vidc-test")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // exec.Command needs the extension on Windows
+	}
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build test binary: %v\n%s", err, out)
