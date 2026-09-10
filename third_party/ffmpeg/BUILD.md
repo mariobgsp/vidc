@@ -24,6 +24,12 @@ statically.
 
 Two details are load-bearing and must not be "cleaned up":
 
+- `xxd` must be installed where the recipe runs. Meson uses it to embed the
+  VMAF model JSON into libvmaf; without it the build still succeeds but the
+  models are silently missing, and every VMAF measurement fails at runtime
+  ("no such built-in model"). The recipe fails fast if `xxd` is absent, and
+  CI asserts the embedded model with `strings ffmpeg | grep vmaf_v0.6.1`.
+
 - `libvmaf` must appear in `--enable-filter`, not just `--enable-libvmaf`.
   `--disable-everything` disables all filters, so the library alone links without
   enabling the filter — configure still lists it under "External libraries" while the

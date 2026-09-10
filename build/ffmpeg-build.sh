@@ -3,6 +3,11 @@
 # See third_party/ffmpeg/BUILD.md for the full rationale.
 set -e
 
+# xxd embeds the VMAF model JSON into libvmaf at build time. Without it the
+# build still succeeds but the models are silently missing, and every VMAF
+# measurement fails at runtime ("no such built-in model"). Fail fast instead.
+command -v xxd >/dev/null || { echo "xxd is required (embeds VMAF models)"; exit 1; }
+
 FFMPEG_VERSION=9.0.1
 X264_VERSION=b35605a          # pin to the revision matching the tested build
 VMAF_VERSION=v3.2.0
@@ -36,6 +41,19 @@ curl -fsSLO "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 tar xf "ffmpeg-${FFMPEG_VERSION}.tar.xz"
 cd "ffmpeg-${FFMPEG_VERSION}"
 
+# libvmaf's static archive contains C++ objects (libsvm) needing the C++ runtime
+# at link time — including inside configure's own feature check. That probe links
+# as `$ld $LDFLAGS ... -o out TMPO $libs $extralibs`, so the runtime MUST ride in
+# --extra-libs (END position: safe under --as-needed, which Ubuntu enables by
+# default), NOT --extra-ldflags (BEFORE the objects: dropped under --as-needed).
+# -static-libstdc++ alone also fails on a C-driven link; the explicit -lstdc++
+# is what saves it. Per platform:
+case "$(uname -s)" in
+  Darwin*) STDCXX="-lc++" ;;                       # system libc++, always present
+  MINGW*|MSYS*|CYGWIN*) STDCXX="-lstdc++" ;;       # CI sets LDFLAGS=-static there
+  *) STDCXX="-static-libstdc++ -lstdc++" ;;        # fully static on Linux
+esac
+
 PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --prefix="$PREFIX" \
   --disable-everything \
@@ -52,6 +70,7 @@ PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" ./configure \
   --enable-parser=h264,hevc,mpeg4video,mpegvideo,vp8,vp9,av1,aac,mp3,opus,vorbis,flac,ac3 \
   --enable-filter=setpts,transpose,format,scale,null,trim,atrim,aresample,anull,settb,libvmaf \
   --enable-protocol=file,pipe \
-  --enable-swscale --enable-swresample
+  --enable-swscale --enable-swresample \
+  --extra-libs="$STDCXX"
 make -j"$(getconf _NPROCESSORS_ONLN)"
 make install

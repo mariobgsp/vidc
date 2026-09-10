@@ -59,11 +59,11 @@ jobs:
       # --- 1. platform dependencies for the ffmpeg build ---
       - name: Install build deps (linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build pkg-config ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y nasm meson ninja-build pkg-config xxd ffmpeg
 
       - name: Install build deps (macOS)
         if: runner.os == 'macOS'
-        run: brew install nasm meson ninja pkg-config ffmpeg
+        run: brew install nasm meson ninja pkg-config ffmpeg vim
 
       - name: MSYS2 setup (windows)
         if: runner.os == 'Windows'
@@ -81,6 +81,7 @@ jobs:
             mingw-w64-x86_64-python
             mingw-w64-x86_64-ffmpeg
             procps-ng
+            vim
             git
             curl
 
@@ -100,10 +101,17 @@ jobs:
           bash ../build/ffmpeg-build.sh
 
       - name: Dump configure log on failure (posix)
-        if: failure()
+        if: failure() && runner.os != 'Windows'
         run: |
           LOG=$(ls -d .ffbuild/ffmpeg-*/ffbuild/config.log 2>/dev/null | head -1)
           if [ -n "$LOG" ]; then grep -B3 -A18 "ERROR:" "$LOG" | head -60; fi
+
+      - name: Dump configure log on failure (windows)
+        if: failure() && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $log = Get-ChildItem .ffbuild/ffmpeg-*/ffbuild/config.log -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($log) { Select-String -Path $log.FullName -Pattern 'ERROR:' -Context 3,18 | Select-Object -First 60 }
 
       # --- 3. the A2 usability assertions: the artifact must actually work ---
       - name: Assert ffmpeg features (posix)
@@ -113,6 +121,7 @@ jobs:
           $FF -hide_banner -filters  | grep -q libvmaf         || { echo "libvmaf filter MISSING"; exit 1; }
           $FF -hide_banner -encoders | grep -q libx264         || { echo "libx264 MISSING"; exit 1; }
           $FF -hide_banner -encoders | grep -q wrapped_avframe || { echo "wrapped_avframe MISSING"; exit 1; }
+          strings $FF | grep -q vmaf_v0.6.1 || { echo "built-in VMAF model MISSING (was xxd present for the libvmaf build?)"; exit 1; }
 
       - name: Assert ffmpeg features (windows)
         if: runner.os == 'Windows'
@@ -122,6 +131,7 @@ jobs:
           $FF -hide_banner -filters  | grep -q libvmaf         || { echo "libvmaf filter MISSING"; exit 1; }
           $FF -hide_banner -encoders | grep -q libx264         || { echo "libx264 MISSING"; exit 1; }
           $FF -hide_banner -encoders | grep -q wrapped_avframe || { echo "wrapped_avframe MISSING"; exit 1; }
+          strings $FF | grep -q vmaf_v0.6.1 || { echo "built-in VMAF model MISSING (was xxd present for the libvmaf build?)"; exit 1; }
           if $FF -version 2>/dev/null | grep -qi "libwinpthread\|libstdc++-6"; then :; fi
           ldd $FF | grep -Ei "winpthread|libstdc\+\+-6|libgcc_s" && { echo "unexpected DLL dependency"; exit 1; } || true
 
