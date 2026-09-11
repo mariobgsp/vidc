@@ -75,7 +75,7 @@ jobs:
             mingw-w64-x86_64-toolchain
             make
             nasm
-            meson
+            mingw-w64-x86_64-meson
             ninja
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-python
@@ -98,13 +98,6 @@ jobs:
         run: |
           mkdir -p .ffbuild && cd .ffbuild
           export LDFLAGS="-static"
-          # meson refuses msys python in a MinGW env; ensure a mingw python3 exists.
-          ls /mingw64/bin/ | grep -i python || true
-          PY=$(ls /mingw64/bin/python3.[0-9]*.exe 2>/dev/null | head -1)
-          if [ ! -x /mingw64/bin/python3.exe ] && [ -n "$PY" ]; then ln -sf "$PY" /mingw64/bin/python3.exe; fi
-          hash -r
-          command -v python3
-          python3 -c "import sys; print(sys.executable)"
           bash ../build/ffmpeg-build.sh
 
       - name: Dump configure log on failure (posix)

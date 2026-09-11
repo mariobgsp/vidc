@@ -236,12 +236,26 @@ func TestVMAFCancelKillsChild(t *testing.T) {
 	var pids []string
 	deadline := time.Now().Add(15 * time.Second)
 	for len(pids) == 0 && time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
-		pids = pgrepTestChildren(t, dir)
+		select {
+		case r := <-ch:
+			// measureVMAF already returned: report what happened instead of
+			// blaming an invisible child (e.g. instant failure on this OS).
+			cancel()
+			t.Fatalf("measureVMAF returned early score=%.2f off=%v ok=%v; child PIDs seen: %v", r.score, r.off, r.ok, pgrepTestChildren(t, dir))
+		case <-time.After(100 * time.Millisecond):
+			pids = pgrepTestChildren(t, dir)
+		}
 	}
 	if len(pids) == 0 {
 		cancel()
-		t.Fatal("no libvmaf child appeared; cannot prove the kill")
+		psout, _ := exec.Command("ps", "-ax", "-o", "pid,command").Output()
+		var ff []string
+		for _, line := range strings.Split(string(psout), "\n") {
+			if strings.Contains(line, "ffmpeg") {
+				ff = append(ff, strings.TrimSpace(line))
+			}
+		}
+		t.Fatalf("no ffmpeg child appeared for dir %s; ps shows: %v", dir, ff)
 	}
 	cancel()
 	start := time.Now()
