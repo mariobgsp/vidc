@@ -1,4 +1,0 @@
-# Shell scripts must keep LF endings everywhere (a CRLF build/ffmpeg-build.sh
-# breaks under sh/bash, and AppRun ships inside the AppImage).
-*.sh text eol=lf
-packaging/appimage/AppRun text eol=lf

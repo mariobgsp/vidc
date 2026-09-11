@@ -1,9 +1,0 @@
-[Desktop Entry]
-Name=vidc
-Comment=Compress videos to universally playable H.264 MP4s
-Exec=vidc
-Icon=vidc
-Type=Application
-Categories=AudioVideo;Video;
-Terminal=false
-StartupWMClass=vidc

@@ -9,7 +9,7 @@ A Go CLI that compresses videos into universally playable H.264 MP4s using ffmpe
 - Measures VMAF on a 30-second sample and reports the score.
 - Never modifies your source file. Output is written beside the original.
 - Optionally hits an exact target file size (2-pass) for platform upload limits.
-- Single static binary; needs ffmpeg on `PATH` (plus a system WebKitGTK for the app window on Linux — see below).
+- Single static binary, no runtime dependencies beyond ffmpeg.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ A Go CLI that compresses videos into universally playable H.264 MP4s using ffmpe
 
    vidc checks for both on startup and prints the right hint for your OS if either is missing.
 
-2. **Go 1.27+** — only needed if you install via `go install` or build from source. Not needed if you use a prebuilt binary.
+2. **Go 1.22+** — only needed if you install via `go install` or build from source. Not needed if you use a prebuilt binary.
 
 **VMAF is optional.** If your ffmpeg was built without `libvmaf`, the VMAF step is skipped silently rather than failing. If no score appears in your report, that is why — the re-encode itself is unaffected.
 
@@ -35,7 +35,7 @@ A Go CLI that compresses videos into universally playable H.264 MP4s using ffmpe
 go install github.com/mariobgsp/vidc@latest
 ```
 
-Requires Go 1.27+. The binary lands in `$(go env GOPATH)/bin`, which is often not on `PATH` by default. Add it:
+Requires Go 1.22+. The binary lands in `$(go env GOPATH)/bin`, which is often not on `PATH` by default. Add it:
 
 ```sh
 export PATH="$PATH:$(go env GOPATH)/bin"
@@ -51,8 +51,7 @@ release has been published yet**, so this download is not available today.
 
 Until then, the way to run vidc on a machine without Go is to build the binary here
 and copy it over. vidc is a single static binary with no runtime dependencies beyond
-ffmpeg (and a system WebKitGTK for the window on Linux), so this works across
-machines of the same OS/architecture:
+ffmpeg, so this works across machines of the same OS/architecture:
 
 ```sh
 make all          # produces dist/vidc-{linux-amd64,windows-amd64.exe,darwin-amd64,darwin-arm64}
@@ -128,58 +127,6 @@ probes the file, then shows the facts and a quality menu:
   grain, very static screen recordings) they can be off by more than 2x, so treat them
   as an order of magnitude, not a promise.
 
-## The app window
-
-Running `vidc` with no arguments opens a small app window when it is typed in a
-terminal on a desktop. On a headless machine (SSH, cron, a script) the same command
-gives the CLI wizard. Which one you get:
-
-| invocation | result |
-| --- | --- |
-| `vidc` typed in a terminal, on a desktop | the app window |
-| `vidc` with stdin not a terminal (script, cron, `</dev/null`) | CLI: usage, or the wizard |
-| `vidc` on a headless machine | the CLI wizard |
-| `vidc file.mp4` | CLI, as always |
-| `vidc --gui` | force the window, even if stdin is not a terminal |
-| `vidc --cli` | force the CLI, even on a desktop |
-
-The window is only chosen automatically when there is **both** a display **and** an
-interactive terminal, so that piping or redirecting `vidc` never pops a window open
-unexpectedly mid-script. **`--gui` is what a desktop launcher should use**: a
-double-clicked icon gets stdin that is not a terminal, so a launcher (a `.desktop`
-file, a Windows shortcut, a macOS app bundle — none shipped yet) must invoke
-`vidc --gui`.
-
-The window does the same job as the CLI: **Add files** opens a native file picker,
-each file gets a progress bar, you pick a quality preset or type a target size, choose
-an output folder, toggle VMAF verification, then **Start**. **Cancel** stops everything;
-**Open folder** shows the finished files. Settings are remembered between launches.
-
-Drag-and-drop is **not** supported: the GUI toolkit exposes no drag-and-drop API, and
-a WebView does not hand JavaScript the local path of a dropped file, so there is no
-way to turn a drop into an input. The drop area is a click target that opens the Add
-files picker, and dropping a file on it shows a pointer to that button rather than
-silently doing nothing.
-
-Cancelling stops the encode and deletes the incomplete output; the source file is
-never touched. If the encode had already finished and only the VMAF measurement was
-still running, cancelling keeps the finished file.
-
-On Linux the window needs a system WebKitGTK. If it is missing, `vidc` prints the
-install hint and falls back to the CLI wizard instead of failing:
-
-```sh
-pacman -S webkit2gtk-4.1                # Arch/Omarchy
-sudo apt install libwebkit2gtk-4.1-0    # Debian/Ubuntu
-sudo dnf install webkit2gtk4.1          # Fedora
-```
-
-Windows needs nothing extra beyond the WebView2 runtime that ships with current
-Windows 10/11; macOS needs nothing extra.
-
-The CLI is unchanged and remains fully supported — the window is an addition, not a
-replacement.
-
 ## Flags
 
 | flag | default | meaning |
@@ -190,8 +137,6 @@ replacement.
 | `-j N` | `min(4, NumCPU/4)` | how many files to encode in parallel |
 | `--no-verify` | off | skip the VMAF measurement pass |
 | `-y` | off | skip the wizard, use defaults/flags |
-| `-gui` | off | force the app window |
-| `-cli` | off | force the CLI, even on a desktop |
 | `-version` | | print the version |
 | `-h` | | usage |
 
@@ -317,14 +262,9 @@ make test    # run the test suite (needs ffmpeg; see below)
 make clean   # remove dist/
 ```
 
-The encode logic uses only the standard library, but the app window adds three direct
-pure-Go (CGo-free) dependencies (glaze, purego, x/term) plus `golang.org/x/sys`
-indirectly — which is why `CGO_ENABLED=0`
-cross-compilation still works for every platform. The tests need
+The module is stdlib-only by design — no third-party dependencies. The tests need
 ffmpeg and ffprobe on `PATH`; the end-to-end test skips itself when ffmpeg is absent.
-A source build requires Go 1.27+; the version floor comes from the GUI dependency (glaze).
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Third-party components (including the bundled
-ffmpeg build) are listed in [THIRDPARTY.md](THIRDPARTY.md).
+MIT — see [LICENSE](LICENSE).

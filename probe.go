@@ -60,7 +60,7 @@ type ffSideData struct {
 }
 
 func probe(path string) (*Info, error) {
-	cmd := exec.Command(toolPath("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "--", path)
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "--", path)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("ffprobe %s: %w: %s", path, err, strings.TrimSpace(string(out)))

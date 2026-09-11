@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -17,7 +16,7 @@ var (
 
 func vmafAvailable() bool {
 	vmafOnce.Do(func() {
-		out, err := exec.Command(toolPath("ffmpeg"), "-hide_banner", "-filters").CombinedOutput()
+		out, err := exec.Command("ffmpeg", "-hide_banner", "-filters").CombinedOutput()
 		if err != nil {
 			vmafCachedVal = false
 			return
@@ -27,11 +26,11 @@ func vmafAvailable() bool {
 	return vmafCachedVal
 }
 
-// vmafArgs builds the sample-trimmed libvmaf invocation: the encoded file is
-// input 0 (distorted) and the original is input 1 (reference). Single-sourced
-// so the order cannot drift between callers.
-func vmafArgs(orig, enc string, d time.Duration) (args []string, start time.Duration) {
-	var length time.Duration
+func measureVMAF(orig, enc string, d time.Duration) (float64, time.Duration, bool) {
+	if !vmafAvailable() {
+		return 0, 0, false
+	}
+	var start, length time.Duration
 	if d < 35*time.Second {
 		start, length = 0, d
 	} else {
@@ -43,20 +42,12 @@ func vmafArgs(orig, enc string, d time.Duration) (args []string, start time.Dura
 	}
 	ss := fmt.Sprintf("%.3f", start.Seconds())
 	tt := fmt.Sprintf("%.3f", length.Seconds())
-	args = []string{"-hide_banner",
+	args := []string{"-hide_banner",
 		"-ss", ss, "-t", tt, "-i", enc,
 		"-ss", ss, "-t", tt, "-i", orig,
 		"-lavfi", "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf",
-		"-an", "-f", "null", "-"}
-	return args, start
-}
-
-func measureVMAF(ctx context.Context, orig, enc string, d time.Duration) (float64, time.Duration, bool) {
-	if !vmafAvailable() {
-		return 0, 0, false
-	}
-	args, start := vmafArgs(orig, enc, d)
-	out, err := exec.CommandContext(ctx, toolPath("ffmpeg"), args...).CombinedOutput()
+		"-f", "null", "-"}
+	out, err := exec.Command("ffmpeg", args...).CombinedOutput()
 	if err != nil {
 		return 0, 0, false
 	}

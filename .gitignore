@@ -1,9 +1,4 @@
 dist/
-dist-ffmpeg/
-ffmpeg-*/
-x264/
-vmaf/
-*.AppImage
 *.min.mp4
 *.min-*.mp4
 /vidc
