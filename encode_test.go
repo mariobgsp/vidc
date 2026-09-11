@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -296,5 +297,47 @@ func TestSplitArgs(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func buildTestBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "vidc-test")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build test binary: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// TestCLIExitsOnEOF guards a crash-class bug: with stdin at EOF the wizard
+// printed "video path: " forever (264 MB in 25 s, spinning a CPU core) because
+// ReadString's error was discarded and EOF looked like a blank line. It also
+// asserts on BYTES WRITTEN, so a fast runaway loop cannot slip past the timeout
+// unnoticed. This is the standard non-interactive shape: cron, a script,
+// `ssh host vidc`, or `vidc </dev/null`.
+func TestCLIExitsOnEOF(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the binary")
+	}
+	bin := buildTestBinary(t)
+	cmd := exec.Command(bin)
+	cmd.Stdin = strings.NewReader("") // immediate EOF
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+		// exited: good, now assert it did not spam
+	case <-time.After(20 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("binary did not exit within 20s with stdin at EOF (runaway-wizard bug); output so far: %d bytes", out.Len())
+	}
+	if out.Len() > 64*1024 {
+		t.Fatalf("wrote %d bytes to stdout on EOF; expected a short usage message", out.Len())
 	}
 }

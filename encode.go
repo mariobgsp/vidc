@@ -295,13 +295,9 @@ func parseSpeed(s string) (float64, bool) {
 	return f, true
 }
 
-func isTTY() bool {
-	fi, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
-}
+// isTTY reports whether stdout is an interactive terminal.
+// See isTerminal in main.go for why os.ModeCharDevice is not a valid test.
+func isTTY() bool { return isTerminal(os.Stdout) }
 
 func parseSize(s string) (int64, error) {
 	t := strings.TrimSpace(strings.ToLower(s))

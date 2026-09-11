@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 var version = "dev"
@@ -288,12 +290,14 @@ func preflight() {
 	os.Exit(1)
 }
 
-func isStdinTTY() bool {
-	fi, err := os.Stdin.Stat()
-	if err != nil {
-		return false
-	}
-	return fi.Mode()&os.ModeCharDevice != 0
+func isStdinTTY() bool { return isTerminal(os.Stdin) }
+
+// isTerminal reports whether f is an interactive terminal.
+// os.ModeCharDevice is NOT sufficient: /dev/null and /dev/zero are character
+// devices, so that test wrongly reports them as terminals (which made
+// `vidc </dev/null` run the wizard and spin on EOF).
+func isTerminal(f *os.File) bool {
+	return term.IsTerminal(int(f.Fd()))
 }
 
 // splitArgs reorders args so flags (and their values) precede file operands.
@@ -337,7 +341,11 @@ func wizard(files []string) (q, size string, out []string, ok bool) {
 	out = files
 	for len(out) == 0 {
 		emit(os.Stdout, "video path: ")
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			// EOF or read error with nothing buffered: nobody is there to answer.
+			return "", "", nil, false
+		}
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -396,7 +404,12 @@ func wizard(files []string) (q, size string, out []string, ok bool) {
 	emit(os.Stdout, "\n  or type a target size (e.g. 8M):\n")
 	for {
 		emit(os.Stdout, "> ")
-		line, _ := in.ReadString('\n')
+		line, err := in.ReadString('\n')
+		if err != nil && strings.TrimSpace(line) == "" {
+			// EOF with nothing buffered: stop rather than silently
+			// encoding with a default for a user who is not there.
+			return "", "", nil, false
+		}
 		line = strings.TrimSpace(strings.ToLower(line))
 		if line == "" {
 			return "good", "", out, true
