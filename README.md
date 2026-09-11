@@ -6,7 +6,7 @@ A Go CLI that compresses videos into universally playable H.264 MP4s using ffmpe
 
 - Re-encodes to H.264 High profile + `yuv420p` + AAC in `.mp4`, which plays on essentially every phone, browser, TV, and chat app.
 - Targets a *visually lossless* quality level (tuned CRF), so you normally cannot tell the difference — not bit-identical, and not a guarantee.
-- Measures VMAF on a 30-second sample and reports the score.
+- Measures VMAF on a 30-second sample, scoring every 4th frame across all cores, and reports the score.
 - Never modifies your source file. Output is written beside the original.
 - Optionally hits an exact target file size (2-pass) for platform upload limits.
 - Single static binary, no runtime dependencies beyond ffmpeg.
@@ -25,7 +25,7 @@ A Go CLI that compresses videos into universally playable H.264 MP4s using ffmpe
 
 2. **Go 1.22+** — only needed if you install via `go install` or build from source. Not needed if you use a prebuilt binary.
 
-**VMAF is optional.** If your ffmpeg was built without `libvmaf`, the VMAF step is skipped silently rather than failing. If no score appears in your report, that is why — the re-encode itself is unaffected.
+**VMAF is optional.** If your ffmpeg was built without `libvmaf`, the VMAF step is skipped silently rather than failing. If no score appears in your report, that is why — the re-encode itself is unaffected. The score is threaded and subsampled by default, so it can differ from an exact pass by ~0.15; a filter error also falls back to the exact pass rather than failing.
 
 ## Install
 
@@ -136,12 +136,13 @@ probes the file, then shows the facts and a quality menu:
 | `-o DIR` | beside source | write outputs into DIR instead |
 | `-j N` | `min(4, NumCPU/4)` | how many files to encode in parallel |
 | `--no-verify` | off | skip the VMAF measurement pass |
+| `--vmaf-full` | off | exact, ~4x slower VMAF pass (default scores every 4th frame on all cores) |
 | `-y` | off | skip the wizard, use defaults/flags |
 | `-version` | | print the version |
 | `-h` | | usage |
 
-(`--size`, `--no-verify`, and `--version` also work in single-dash form: `-size`,
-`-no-verify`, `-version`.)
+(`--size`, `--no-verify`, `--vmaf-full`, and `--version` also work in single-dash form: `-size`,
+`-no-verify`, `-vmaf-full`, `-version`.)
 
 Note for `-j`: x264 already uses many threads per file, so raising `-j` beyond a few
 gives little and can slow each file down.
@@ -205,7 +206,9 @@ VMAF is a perceptual quality metric where 100 means identical to the source. Rou
 guide: **95+ very good, 93–95 acceptable, below 93 vidc warns**.
 
 Be aware it is measured on a **30-second sample from the middle** of the file, not the
-whole thing, so it is a strong signal rather than a proof. If your ffmpeg lacks
+whole thing, so it is a strong signal rather than a proof. By default the score comes
+from every 4th frame, threaded across all available cores; it tracks the exact score to
+within ~0.15. Pass `--vmaf-full` for the exact pass, which is about 4x slower. If your ffmpeg lacks
 `libvmaf`, the measurement is skipped silently and the report says so.
 
 ## Important: output can be larger
@@ -228,7 +231,7 @@ re-encoding cannot preserve the original bit-for-bit.
 | --- | --- | --- |
 | `ffmpeg not found` | ffmpeg not on PATH | install it (see Requirements) |
 | output is bigger than the input | source already well compressed | use `-q fast` or `--size` |
-| no VMAF score shown | local ffmpeg lacks `libvmaf` | nothing to fix; re-encode is unaffected |
+| no VMAF score shown | local ffmpeg lacks `libvmaf`, or the VMAF pass failed | nothing to fix; re-encode is unaffected |
 | `VMAF ... < 93` warning | the preset or `--size` was too aggressive | use a higher preset, or drop `--size` |
 | filename starting with `-` fails | the shell/ffprobe treats it as a flag | put `--` before it: `vidc -- -weird.mp4` |
 | subtitles or a 2nd audio track are gone | vidc keeps only the first video and first audio track | see Limitations |
@@ -241,7 +244,7 @@ re-encoding cannot preserve the original bit-for-bit.
 - 5.1 audio is downmixed to stereo on purpose, so the file plays everywhere.
 - GPS coordinates, device make/model, and encoder strings are stripped. Rotation is
   applied to the pixels so orientation is preserved. Creation time is kept.
-- VMAF is a 30-second sample, not the whole file.
+- VMAF is a 30-second sample scored every 4th frame (unless `--vmaf-full`), not the whole file.
 - No lossless mode exists.
 - "Visually lossless" means VMAF >= 93 typically, not bit-identity.
 - Interrupting (Ctrl-C) a run may leave a partial output file and a `vidc-pass*`

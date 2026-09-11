@@ -41,6 +41,7 @@ func run(args []string) int {
 	outDir := fs.String("o", "", "output directory")
 	jobs := fs.Int("j", min(4, max(1, runtime.NumCPU()/4)), "parallel jobs")
 	noVerify := fs.Bool("no-verify", false, "skip VMAF")
+	vmafFull := fs.Bool("vmaf-full", false, "run the slow full-quality VMAF pass (default: fast threaded/subsampled)")
 	assumeYes := fs.Bool("y", false, "assume yes / skip wizard")
 	showVer := fs.Bool("version", false, "print version")
 	if err := fs.Parse(splitArgs(args)); err != nil {
@@ -118,7 +119,7 @@ func run(args []string) int {
 			defer func() { <-sem }()
 			r := &results[i]
 			r.file = f
-			st, err := processOne(f, p, target, *outDir, !*noVerify)
+			st, err := processOne(f, p, target, *outDir, !*noVerify, *vmafFull)
 			if err != nil {
 				r.mu.Lock()
 				r.errText = err.Error()
@@ -160,7 +161,7 @@ type reportStat struct {
 	vmafStr  string
 }
 
-func processOne(f string, p preset, target int64, outDir string, verify bool) (*reportStat, error) {
+func processOne(f string, p preset, target int64, outDir string, verify bool, fullVMAF bool) (*reportStat, error) {
 	info, err := probe(f)
 	if err != nil {
 		return nil, err
@@ -211,7 +212,7 @@ func processOne(f string, p preset, target int64, outDir string, verify bool) (*
 	var offset time.Duration
 	var ok bool
 	if verify {
-		score, offset, ok = measureVMAF(f, out, info.Duration)
+		score, offset, ok = measureVMAF(f, out, info.Duration, fullVMAF)
 		if ok {
 			vmafStr = fmt.Sprintf("%.2f @ %s", score, formatOffset(offset))
 		}

@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +163,22 @@ func TestBuildArgs(t *testing.T) {
 		got2 := buildArgs(pl2, 0, "")
 		if !strings.Contains(strings.Join(got2, " "), "-c:a aac") {
 			t.Fatalf("%s: missing aac transcode in %q", pr.Name, got2)
+		}
+	}
+}
+
+func TestVMAFFilter(t *testing.T) {
+	want := "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf=" + fmt.Sprintf("n_threads=%d:n_subsample=4", runtime.GOMAXPROCS(0))
+	if fast := vmafFilter(false); fast != want {
+		t.Fatalf("fast filter changed: got %s, want %s", fast, want)
+	}
+	full := vmafFilter(true)
+	if full != "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf" {
+		t.Fatalf("full filter changed: %s", full)
+	}
+	for _, bad := range []string{"n_threads", "n_subsample"} {
+		if strings.Contains(full, bad) {
+			t.Fatalf("full filter must not contain %q: %s", bad, full)
 		}
 	}
 }

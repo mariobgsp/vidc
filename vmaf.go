@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +27,25 @@ func vmafAvailable() bool {
 	return vmafCachedVal
 }
 
-func measureVMAF(orig, enc string, d time.Duration) (float64, time.Duration, bool) {
+// vmafFilter builds the lavfi graph. The fast path threads libvmaf and
+// subsamples 4x; the full path is the plain filter (bit-exact).
+func vmafFilter(full bool) string {
+	f := "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf"
+	if !full {
+		f += fmt.Sprintf("=n_threads=%d:n_subsample=4", runtime.GOMAXPROCS(0))
+	}
+	return f
+}
+
+func vmafArgs(enc, orig, ss, tt string, exact bool) []string {
+	return []string{"-hide_banner",
+		"-ss", ss, "-t", tt, "-i", enc,
+		"-ss", ss, "-t", tt, "-i", orig,
+		"-lavfi", vmafFilter(exact),
+		"-f", "null", "-"}
+}
+
+func measureVMAF(orig, enc string, d time.Duration, full bool) (float64, time.Duration, bool) {
 	if !vmafAvailable() {
 		return 0, 0, false
 	}
@@ -40,14 +59,15 @@ func measureVMAF(orig, enc string, d time.Duration) (float64, time.Duration, boo
 		}
 		start, length = mid, 30*time.Second
 	}
+	// Short clips: subsampling a handful of frames skews the score, so treat
+	// them as an exact pass.
+	exact := full || length < 10*time.Second
 	ss := fmt.Sprintf("%.3f", start.Seconds())
 	tt := fmt.Sprintf("%.3f", length.Seconds())
-	args := []string{"-hide_banner",
-		"-ss", ss, "-t", tt, "-i", enc,
-		"-ss", ss, "-t", tt, "-i", orig,
-		"-lavfi", "[0:v]setpts=PTS-STARTPTS[d];[1:v]setpts=PTS-STARTPTS[r];[d][r]libvmaf",
-		"-f", "null", "-"}
-	out, err := exec.Command("ffmpeg", args...).CombinedOutput()
+	out, err := exec.Command("ffmpeg", vmafArgs(enc, orig, ss, tt, exact)...).CombinedOutput()
+	if err != nil && !exact {
+		out, err = exec.Command("ffmpeg", vmafArgs(enc, orig, ss, tt, true)...).CombinedOutput()
+	}
 	if err != nil {
 		return 0, 0, false
 	}
